@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <link rel="stylesheet" type="text/css" href="./styles/default.css"/>
+        <title>KinDxd - Anonymous WebChat</title>
+    </head>
+    <body>
+        <div class="top-bar">
+            <h1 class="title">KinDxd - Anonymous WebChat</h1>
+        </div>
+        <div class="chat-frame">
+            <div id="chat-box">
+
+            </div>
+            <input id="message-box" placeholder="Send a message..."/>
+            <button id="send-button">></button>
+        </div>
+    </body>
+    <script type="text/javascript">
+        // Config
+        const maxMessagesBuffer = 50;
+        let serverHost = "127.0.0.1";
+        let serverPort = 4444;
+        // Config End
+
+        const chatBox = document.getElementById("chat-box");
+        const messageBox = document.getElementById("message-box");
+        const sendButton = document.getElementById("send-button");
+        let webSocket = null;
+
+        function appendMessage(messageAuthorName, textMessage) {
+            if (chatBox.children.length > maxMessagesBuffer) {
+                chatBox.children[0].remove();
+            };
+
+            const messageText = document.createElement("p");
+            const messageAuthor = document.createElement("b");
+            
+            messageAuthor.innerText = `${messageAuthorName}: `;
+            messageText.append(messageAuthor);
+            messageText.append(textMessage);
+            messageText.className = "message-content";
+
+            chatBox.append(messageText);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        };
+
+        function executeMessage() {
+            const messageContent = messageBox.value;
+            
+            if (messageContent.trim() == "") {
+                return;
+            };
+
+            if (messageContent[0] == "/") {
+                const commandString = messageContent.slice(1);
+                executeCommand(commandString);
+                messageBox.value = "";
+                return;
+            };
+
+            messageBox.value = "";
+            sendMessage(messageContent);
+        };
+
+        function sendMessage(messageString) {
+            if (webSocket == null) {
+                appendMessage("Client", "You are not connected to the server. Type /connect to connect.");
+                return;
+            };
+
+            const dataJson = {"op": "MESSAGE_CREATE", "message": messageString};
+            const dataString = JSON.stringify(dataJson);
+
+            webSocket.send(dataString);
+        };
+
+        function executeCommand(commandString) {
+            if (commandString.trim() == "") {
+                appendMessage("Client", "Empty command given.");
+            };
+            
+            const fullCommand = commandString.split(" ");
+
+            const command = fullCommand[0].toLowerCase();
+            const commandArgs = fullCommand.slice(1);
+
+            switch (command){
+                case "clear":
+                    clearMessages();
+                    return;
+                case "connect":
+                    connectServer();
+                    return;
+                case "disconnect":
+                    disconnectServer();
+                    return;
+                case "host":
+                    if (!commandArgs[0]) {
+                        appendMessage("Client", "Missing command argument [HOST]");
+                        return;
+                    };
+                    serverHost = commandArgs[0];
+                    appendMessage("Client", `serverHost has been set to ${serverHost}`);
+                    return;
+                case "port":
+                    if (!commandArgs[0]) {
+                        appendMessage("Client", "Missing command argument [PORT]");
+                        return;
+                    }
+                    serverPort = commandArgs[0];
+                    appendMessage("Client", `serverPort has been set to ${serverPort}`);
+                    return;
+            };
+
+            appendMessage("Client", `Invalid command "${command}"`);
+        };
+
+        function clearMessages() {
+            chatBox.innerHTML = "";
+        };
+
+        function connectServer() {
+            if (webSocket != null) {
+                appendMessage("Client", "You are already connected to the server.");
+                return;
+            };
+
+            let connectSuccess = false;
+            const webSocketNew = new WebSocket(`ws://${serverHost}:${serverPort}`);
+
+            webSocketNew.onopen = function() {
+                connectSuccess = true;
+                appendMessage("Client", `Successfully connected to server ${serverHost}:${serverPort}`);
+                webSocket = webSocketNew;
+            };
+            webSocketNew.onerror = function () {
+                appendMessage("Client", `There was an error connecting to server ${serverHost}:${serverPort}.`);
+            };
+            webSocketNew.onclose = function () {
+                if (!connectSuccess) {
+                    return;
+                };
+                appendMessage("Client", "WebSocket client has been closed.");
+                webSocket = null;
+            };
+            webSocketNew.onmessage = function (wsData) {
+                const messageData = JSON.parse(wsData.data);
+                
+                switch (messageData.op) {
+                    case "MESSAGE_CREATE":
+                        const messageText = messageData.message;
+                        const messageAuthor = messageData.user;
+                        appendMessage(messageAuthor, messageText);
+                };
+            };
+        }
+
+        function disconnectServer() {
+            if (webSocket == null) {
+                appendMessage("Client", "You are not connected to the server.");
+                return;
+            }
+
+            webSocket.close();
+            webSocket = null;
+            appendMessage("Client", "Disconnected from the server.");
+        };
+
+        window.addEventListener("keyup", (key) => {
+            if (key.key == "Enter") {
+                executeMessage();
+            }
+        });
+
+        sendButton.addEventListener("click", executeMessage);
+    </script>
+</html>
