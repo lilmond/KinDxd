@@ -2,58 +2,45 @@ import websockets
 import asyncio
 import json
 
-LAST_CLIENT_ID = 0
-clients = []
-
-def generate_user():
-    global LAST_CLIENT_ID
-
-    client_id = LAST_CLIENT_ID + 1
-    LAST_CLIENT_ID += 1
-
-    return f"Anonymous-{client_id}"
-
-async def handler(client):
-    clients.append(client)
-    client_user = generate_user()
+async def handler(client, clients):
+    client_user = f"Anonymous-{id(client)}"
+    clients.add(client)
 
     try:
         await client.send(json.dumps({"op": "MESSAGE_CREATE", "user": "Server", "message": f"Welcome to the server. You are identified as {client_user}."}))
-    except Exception:
-        return
-    
-    while True:
+    except websockets.exceptions.ConnectionClosedOK:
+        pass
+
+    async for message in client:
         try:
-            data = await client.recv()
-            print(len(clients))
-            
-            try:
-                data = json.loads(data)
-            except Exception:
-                continue
+            data = json.loads(message)
+        except json.JSONDecodeError:
+            continue
 
-            if not "op" in data:
-                await client.close()
-                return
-            
-            match data["op"]:
-                case "MESSAGE_CREATE":
-                    if not "message" in data:
-                        await client.close()
-                        return
-                    message = data["message"]
-
-                    clients_copy = clients.copy()
-                    for client_ws in clients_copy:
-                        try:
-                            await client_ws.send(json.dumps({"op": "MESSAGE_CREATE", "user": client_user, "message": message}))
-                        except Exception:
-                            clients.remove(client_ws)
-        except Exception:
+        if "op" not in data:
             await client.close()
+            clients.remove(client)
+            break
+
+        if data["op"] == "MESSAGE_CREATE":
+            if "message" not in data:
+                await client.close()
+                clients.remove(client)
+                break
+
+            message = data["message"]
+            for client_ws in clients:
+                if client_ws != client:
+                    try:
+                        await client_ws.send(json.dumps({"op": "MESSAGE_CREATE", "user": client_user, "message": message}))
+                    except websockets.exceptions.ConnectionClosedOK:
+                        clients.remove(client_ws)
+    else:
+        clients.remove(client)
 
 async def main():
-    async with websockets.serve(handler, "0.0.0.0", 4444):
+    clients = set()
+    async with websockets.serve(lambda c: handler(c, clients), "0.0.0.0", 4444):
         await asyncio.Future()
 
 if __name__ == "__main__":
