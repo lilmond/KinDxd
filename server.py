@@ -11,7 +11,14 @@ async def handler(client, clients):
     except websockets.exceptions.ConnectionClosedOK:
         pass
 
-    async for message in client:
+    while True:
+        try:
+            message = await client.recv()
+        except Exception:
+            clients.remove(client)
+            await client.close()
+            return
+        
         try:
             data = json.loads(message)
         except json.JSONDecodeError:
@@ -30,13 +37,11 @@ async def handler(client, clients):
 
             message = data["message"]
             for client_ws in clients:
-                if client_ws != client:
-                    try:
-                        await client_ws.send(json.dumps({"op": "MESSAGE_CREATE", "user": client_user, "message": message}))
-                    except websockets.exceptions.ConnectionClosedOK:
-                        clients.remove(client_ws)
-    else:
-        clients.remove(client)
+                try:
+                    await client_ws.send(json.dumps({"op": "MESSAGE_CREATE", "user": client_user, "message": message}))
+                except websockets.exceptions.ConnectionClosedOK:
+                    client_ws.close()
+                    clients.remove(client_ws)
 
 async def main():
     clients = set()
